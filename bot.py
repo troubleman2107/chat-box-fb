@@ -62,6 +62,7 @@ def send_message(recipient_id, message_text):
 
 @app.get("/")
 async def verify_webhook(mode: str, verify_token: str):
+    print(verify_token)
     if mode == "subscribe" and verify_token == VERIFY_TOKEN:
         return int(requests.query_params.get("hub.challenge"))
     else:
