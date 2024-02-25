@@ -1,64 +1,55 @@
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
-import requests
+from typing import List
+import uvicorn
+import httpx
+import os
 
+
+# Request Models.
+class WebhookRequestData(BaseModel):
+    object: str = ""
+    entry: List = []
+
+
+# Helpers.
+async def send_message(
+    page_access_token: str,
+    recipient_id: str,
+    message_text: str,
+    message_type: str = "UPDATE",
+):
+    """
+    Send message to specific user(By recipient ID) from specific page(By
+    access token).
+
+    Arguments:
+        page_access_token: (string) Target page access token.
+        recipient_id: (string) The ID of the user that the message is
+         addressed to.
+        message_text: (string) The content of the message.
+        message_type: (string) The type of the target message.
+         RESPONSE, UPDATE or MESSAGE_TAG - the accurate description -
+         https://developers.facebook.com/docs/messenger-platform/send-messages/#messaging_types
+    """
+    r = httpx.post(
+        "https://graph.facebook.com/v2.6/me/messages",
+        params={"access_token": page_access_token},
+        headers={"Content-Type": "application/json"},
+        json={
+            "recipient": {"id": recipient_id},
+            "message": {"text": message_text},
+            "messaging_type": message_type,
+        },
+    )
+    r.raise_for_status()
+
+
+# Init App.
 app = FastAPI()
 
-VERIFY_TOKEN = "blackcat"
-PAGE_ACCESS_TOKEN = "EAAkoFi3B1W8BO7PnHMvVesE4IAKh1liG69mFIb9iD6rO6tBG2LOoyL4T6IG1V1xxMhgxrka3JgZARrrud8eqq9GZAJEW6broC3c96wapZAbH7jFkJQY6amdY3EOS9izfWvQ1SPHKICHgac3ZCH5rEAk840kKguquFwkhZA0HKOyuURyOaKZCFmqK83ZAI1qhf3b"
 
-
-class Message(BaseModel):
-    sender_id: str
-    message: str
-
-
-@app.post("/webhook")
-async def webhook(request: Request):
-    body = await request.json()
-    if body.get("object") == "page":
-        for entry in body.get("entry"):
-            for messaging_event in entry.get("messaging"):
-                if messaging_event.get("message"):
-                    sender_id = messaging_event["sender"]["id"]
-                    message_text = messaging_event["message"]["text"]
-                    message = Message(sender_id=sender_id, message=message_text)
-                    process_message(message)
-    return "ok"
-
-
-def process_message(message: Message):
-    sender_id = message.sender_id
-    message_text = message.message
-    # Here you can implement your logic to process the received message
-    # For now, let's just echo back the received message
-    send_message(sender_id, message_text)
-
-
-def send_message(recipient_id, message_text):
-    params = {
-        "access_token": PAGE_ACCESS_TOKEN
-    }
-    headers = {
-        "Content-Type": "application/json"
-    }
-    data = {
-        "recipient": {
-            "id": recipient_id
-        },
-        "message": {
-            "text": message_text
-        }
-    }
-    response = requests.post(
-        "https://graph.facebook.com/v12.0/me/messages",
-        params=params,
-        headers=headers,
-        json=data
-    )
-    if response.status_code != 200:
-        print("Failed to send message:", response.text)
-
+# Endpoints.
 @app.router.get("/webhook")
 async def verify(request: Request):
     """
@@ -70,7 +61,7 @@ async def verify(request: Request):
     ):
         if (
             not request.query_params.get("hub.verify_token")
-            == VERIFY_TOKEN
+            == "blackcat"
         ):
             return Response(content="Verification token mismatch", status_code=403)
         return Response(content=request.query_params["hub.challenge"])
@@ -78,9 +69,31 @@ async def verify(request: Request):
     return Response(content="Required arguments haven't passed.", status_code=400)
 
 
+@app.router.post("/webhook")
+async def webhook(data: WebhookRequestData):
+    """
+    Messages handler.
+    """
+    if data.object == "page":
+        for entry in data.entry:
+            messaging_events = [
+                event for event in entry.get("messaging", []) if event.get("message")
+            ]
+            for event in messaging_events:
+                message = event.get("message")
+                sender_id = event["sender"]["id"]
+
+                await send_message(page_access_token="EAAkoFi3B1W8BO7PnHMvVesE4IAKh1liG69mFIb9iD6rO6tBG2LOoyL4T6IG1V1xxMhgxrka3JgZARrrud8eqq9GZAJEW6broC3c96wapZAbH7jFkJQY6amdY3EOS9izfWvQ1SPHKICHgac3ZCH5rEAk840kKguquFwkhZA0HKOyuURyOaKZCFmqK83ZAI1qhf3b",
+                                   recipient_id=sender_id,
+                                   message_text=f"echo: {message['text']}")
+
+    return Response(content="ok")
+
+
+# Debug.
+def main():
+    uvicorn.run(app=app)
+
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
+    main()
