@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 import requests
 
@@ -59,16 +59,28 @@ def send_message(recipient_id, message_text):
     if response.status_code != 200:
         print("Failed to send message:", response.text)
 
+@app.router.get("/webhook")
+async def verify(request: Request):
+    """
+    On webook verification VERIFY_TOKEN has to match the token at the
+    configuration and send back "hub.challenge" as success.
+    """
+    if request.query_params.get("hub.mode") == "subscribe" and request.query_params.get(
+        "hub.challenge"
+    ):
+        if (
+            not request.query_params.get("hub.verify_token")
+            == VERIFY_TOKEN
+        ):
+            return Response(content="Verification token mismatch", status_code=403)
+        return Response(content=request.query_params["hub.challenge"])
 
-@app.get("/")
-async def verify_webhook(mode: str, verify_token: str):
-    print(verify_token)
-    if mode == "subscribe" and verify_token == VERIFY_TOKEN:
-        return int(requests.query_params.get("hub.challenge"))
-    else:
-        raise HTTPException(status_code=403, detail="Verification token mismatch")
+    return Response(content="Required arguments haven't passed.", status_code=400)
+
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
